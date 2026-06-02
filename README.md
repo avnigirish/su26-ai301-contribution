@@ -1,15 +1,17 @@
-# Contribution [#]: [Issue Title]
+# Contribution [#]: docs(monitoring): narrow PlotLossPerTimestep typing + docstring to surface flow-matching coupling
 
 **Contribution Number:** [1 / 2 / 3]  
-**Student:** [Your Name]  
-**Issue:** [GitHub issue link]  
-**Status:** [Phase I / Phase II / Phase III / Phase IV] [In Progress / Complete]
+**Student:** Avni Girish  
+**Issue:** https://github.com/tinaudio/synth-setter/issues/653  
+**Status:** Phase I Complete
 
 ---
 
 ## Why I Chose This Issue
 
-[1-2 paragraphs explaining why this issue interests you, how it matches your skills/learning goals, what you hope to learn]
+I chose this issue because it is a well-scoped, self-contained task that lives entirely in a single file (`src/utils/callbacks.py`) and focuses on type annotations and documentation rather than changing runtime behavior. It's labeled `good first issue`, comes with exact file and line references, and even includes the maintainer's own explanation of *why* per-timestep loss matters — so there's plenty of context to move quickly without guessing.
+
+It also matches my skills and learning goals well. I'm comfortable with Python and type hints, and this issue lets me ramp up on a real ML codebase (PyTorch Lightning, Hydra, Pydantic) in a low-risk way: I have to understand enough of the flow-matching context to document it accurately, but I don't have to implement model logic. I hope to learn how a research-grade training project is structured, how its callbacks and modules fit together, and how to write a clean, reviewable contribution that follows the project's conventions.
 
 ---
 
