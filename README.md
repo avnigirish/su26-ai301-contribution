@@ -3,7 +3,7 @@
 **Contribution Number:** [1 / 2 / 3]  
 **Student:** Avni Girish  
 **Issue:** https://github.com/tinaudio/synth-setter/issues/653  
-**Status:** Phase I Complete
+**Status:** Phase II Complete
 
 ---
 
@@ -19,19 +19,24 @@ It also matches my skills and learning goals well. I'm comfortable with Python a
 
 ### Problem Description
 
-[In your own words, what's broken or missing?]
+The `PlotLossPerTimestep` Lightning callback in `src/synth_setter/utils/callbacks.py` silently depends on flow-matching-specific internals of the module passed to it, but nothing in the code or docs makes that dependency visible. The `pl_module` parameter is untyped, the docstring never states that a `KSinFlowMatchingModule` is required, and there is no early guard. The fix is to narrow the type annotations to `KSinFlowMatchingModule` and expand the docstring to document the requirement and the rationale.
 
 ### Expected Behavior
 
-[What should happen?]
+Misuse should be caught early and clearly. With `pl_module` annotated as `KSinFlowMatchingModule`, a static type checker (the project ships `pyrightconfig.json`) flags any attempt to use the callback with an incompatible module, and the docstring tells a reader up front that the callback only works with a flow-matching module and why per-timestep loss is worth plotting.
 
 ### Current Behavior
 
-[What actually happens?]
+`pl_module` is an unannotated parameter, so the type checker cannot warn at authoring time. At runtime the callback reaches `pl_module.encoder(signal)` and crashes with a cryptic `AttributeError: '<Module>' object has no attribute 'encoder'` when given a non-flow-matching module. The docstring describes only what the callback does, not the requirement or the motivation.
 
 ### Affected Components
 
-[Which parts of the codebase are involved?]
+- `src/synth_setter/utils/callbacks.py` — the `PlotLossPerTimestep` class:
+  - Class docstring — lines 49-53
+  - `_compute_losses(self, trainer, pl_module)` — line 63 (and the flow-matching attribute accesses at lines 68-82)
+  - `on_validation_epoch_end(self, trainer, pl_module)` — line 109
+- Reference patterns (already annotated/guarded, used as a model): `PlotPositionalEncodingSimilarity` (line 169) and `PlotLearntProjection._do_plotting` (line 296).
+- `KSinFlowMatchingModule` is already imported at the top of the file (line 18), so no new import is required.
 
 ---
 
@@ -39,19 +44,32 @@ It also matches my skills and learning goals well. I'm comfortable with Python a
 
 ### Environment Setup
 
-[Notes on setting up your local development environment - challenges you faced, how you solved them]
+Cloned the repo into `synth-setter/`. Because this is a typing + documentation issue with no behavioral bug to trigger, a full training environment (`make install`, Surge VST, etc.) is not needed to reproduce it — the defect is verifiable by code inspection plus reasoning about the type signature and runtime attribute access.
 
 ### Steps to Reproduce
 
-1. [Step 1]
-2. [Step 2]
-3. [Observed result]
+1. Open `src/synth_setter/utils/callbacks.py` and locate the `PlotLossPerTimestep` class.
+2. Confirm `_compute_losses` (line 63) and `on_validation_epoch_end` (line 109) declare `pl_module` with no type annotation.
+3. Confirm the body accesses flow-matching-only internals (`pl_module.encoder`, `.vector_field`, `.hparams.cfg_dropout_rate`, `._sample_x0_and_x1`, `._sample_probability_path`, `._evaluate_target_field`) with no `isinstance` guard.
+4. Compare against the sibling callbacks `PlotPositionalEncodingSimilarity` (line 169) and `PlotLearntProjection` (line 296), which both annotate/guard and return early for incompatible modules.
+5. Observed result: nothing in the type signature or docstring discloses the `KSinFlowMatchingModule` requirement, so the dependency is invisible to both a static type checker and a reader.
 
 ### Reproduction Evidence
 
-- **Commit showing reproduction:** [Link to commit in your fork]
-- **Screenshots/logs:** [If applicable]
-- **My findings:** [What you discovered during reproduction]
+- **Branch:** https://github.com/avnigirish/synth-setter/tree/fix-issue-653 — no separate reproduction commit needed; defect is visible in the current state of `main`.
+- **My findings:** All three problems from the issue are confirmed in the current code: (1) `pl_module` is untyped, (2) there is no runtime guard, and (3) the docstring omits the flow-matching requirement and the reason per-timestep loss matters.
+
+**Evidence 1 — Unannotated `pl_module` in `_compute_losses`, freely accessing flow-matching-only internals:**
+
+![Evidence 1: unannotated pl_module signature](screenshot-evidence/evidence1.png)
+
+**Evidence 2 — Sibling callback `PlotPositionalEncodingSimilarity` correctly guards with `isinstance(pl_module, KSinFlowMatchingModule)` (the pattern `PlotLossPerTimestep` is missing):**
+
+![Evidence 2: sibling callback with isinstance guard](screenshot-evidence/evidence2.png)
+
+**Evidence 3 — `PlotLossPerTimestep` docstring makes no mention of `KSinFlowMatchingModule` or why per-timestep loss matters:**
+
+![Evidence 3: bare docstring with no flow-matching requirement](screenshot-evidence/evidence3.png)
 
 ---
 
@@ -59,30 +77,31 @@ It also matches my skills and learning goals well. I'm comfortable with Python a
 
 ### Analysis
 
-[Your analysis of the root cause - what's causing the issue?]
+The root cause is an undeclared contract. `PlotLossPerTimestep` was written against the `KSinFlowMatchingModule` API but typed against Lightning's generic module, so the dependency lives only in the implementation and not in the interface. There is no bug in the happy path — the gap is that the requirement is undiscoverable, which the issue addresses with typing (machine-checkable) and docs (human-readable). Runtime `isinstance` gating is explicitly out of scope per the issue.
 
 ### Proposed Solution
 
-[High-level description of your fix approach]
+1. Annotate `pl_module` as `KSinFlowMatchingModule` in `_compute_losses` and `on_validation_epoch_end` so the dependency is part of the signature and pyright can enforce it.
+2. Expand the class docstring to (a) state that the callback requires a `KSinFlowMatchingModule`, and (b) explain why per-timestep loss is worth plotting: the Lightning-aggregated training loss is a Monte Carlo estimate over randomly sampled `t`, so it averages away loss-vs-`t` structure that this plot surfaces.
 
 ### Implementation Plan
 
 Using UMPIRE framework (adapted):
 
-**Understand:** [Restate the problem]
+**Understand:** `PlotLossPerTimestep` silently requires a `KSinFlowMatchingModule`. Make that requirement explicit through type annotations and an expanded docstring, without adding runtime guards.
 
-**Match:** [What similar patterns/solutions exist in the codebase?]
+**Match:** The sibling callbacks already model the convention — `PlotPositionalEncodingSimilarity` (line 169) and `PlotLearntProjection` (line 296) reference `KSinFlowMatchingModule` directly. The class is already imported at line 18, so no new import or circular-import risk. Follow the project's comment-hygiene rules (lead docstrings with the contract; `:param:` lines must add semantics, not restate types).
 
-**Plan:** [Step-by-step implementation plan]
-1. [Modify file X to do Y]
-2. [Add function Z]
-3. [Update tests]
+**Plan:**
+1. Add `pl_module: KSinFlowMatchingModule` to `_compute_losses` (line 63) and `on_validation_epoch_end` (line 109).
+2. Rewrite the `PlotLossPerTimestep` docstring (lines 49-53) to state the flow-matching requirement and the Monte-Carlo-averaging rationale.
+3. Run the type checker (pyright) and the fast test suite to confirm nothing regresses.
 
-**Implement:** [Link to your branch/commits as you work]
+**Implement:** https://github.com/avnigirish/synth-setter/tree/fix-issue-653
 
-**Review:** [Self-review checklist - does it follow the project's contribution guidelines?]
+**Review:** Self-review against `CONTRIBUTING.md` and `AGENTS.md`: docstring follows comment-hygiene rules, no behavioral change, runtime gating left out of scope as the issue requests, commit message follows the `docs(monitoring): ...` convention.
 
-**Evaluate:** [How will you verify it works?]
+**Evaluate:** `make test-fast` passes; pyright reports no new errors; manually confirm the annotated signature would flag a non-`KSinFlowMatchingModule` argument.
 
 ---
 
